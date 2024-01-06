@@ -1,0 +1,92 @@
+To get Orbbec Astra working with ROS:
+ sudo ln -s /lib/x86_64-linux-gnu/libudev.so.1.6.4 /lib/x86_64-linux-gnu/libudev.so.0
+ ----------------------------------------------------------
+
+Looks to me like yet another programming goof in XPCOM. Whoever wrote the comment in nsExceptionService::ThreadDestruct should have realized that he bumped into a serious issue with multithreading, and not just a harmless issue with an annoying warning. The bug was present before (checking a pointer to be non-NULL is nice, but it can be set to NULL a clock cycle later, leading to the crashes). Silencing the code which warns about screwup is not clever. The entire code structure is pushing things, because no one waits for thread termination (probably out of fear to cause hangs, replacing that danger with sporadic crashes).
+
+Yes, a clear race, with most likely a pretty small window and needing very specific thread scheduling.
+
+I'm currently thinking about postponing the lock destruction to the destructor, but I have no proof that this is guaranteed to fix the issue (it likely is, because nsExceptionService is a regular XPCOM object, i.e. has refcounting).
+
+
+https://www.virtualbox.org/ticket/15568?cversion=0&cnum_hist=1
+https://www.virtualbox.org/changeset/62170/vbox
+ XPCOM: Change the shutdown order in nsExceptionService, attempting to fix a sporadic crash. The biggest change is postponing the lock freeing to the destructor. The order change of the operations in the Shutdown method eliminates the concerns mention in the ThreadDestruct method. The change in DoDropThread is pure paranoia, intended to avoid potential crashes due to continuing with a NULL pointer in *emp if the thread is not known.
+https://gitlab.com/libvirt/libvirt/-/issues/218
+
+set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
+set(THREADS_PREFER_PTHREAD_FLAG TRUE)
+find_package(Threads REQUIRED)
+
+add_executable(test test.cpp)
+target_link_libraries(test Threads::Threads)
+
+sudo apt install libgtk-3-dev
+cmake -D CMAKE_BUILD_TYPE=Release -D WITH_CUDA=OFF -D WITH_GTK=ON -D WITH_GTK3=ON -D WITH_GTK_2_X=OFF -D ENABLE_PRECOMPILED_HEADERS=OFF -D CMAKE_INSTALL_PREFIX=/usr/local  ..
+
+sudo apt install libavcodec-dev libavformat-dev libswscale-dev libavresample-dev
+sudo apt install libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+sudo apt install libxvidcore-dev x264 libx264-dev libfaac-dev libmp3lame-dev libtheora-dev 
+sudo apt install libfaac-dev libmp3lame-dev libvorbis-dev
+sudo apt install libopencore-amrnb-dev libopencore-amrwb-dev
+----
+sudo find / -name "*opencv*" -exec rm {} \;
+/usr/share/opencv
+
+sudo apt remove libopencv-dev python3-opencv
+sudo apt remove libjpeg-dev libpng-dev libtiff-dev
+sudo apt autoremove
+
+# Create build directory and switch into it
+mkdir -p build && cd build
+# Configure
+cmake -D CMAKE_BUILD_TYPE=Release -D WITH_CUDA=OFF -D WITH_GTK=ON -D WITH_GTK3=ON -D WITH_GTK_2_X=OFF -D ENABLE_PRECOMPILED_HEADERS=OFF -D CMAKE_INSTALL_PREFIX=/usr/local -DOPENCV_EXTRA_MODULES_PATH=../opencv_contrib/modules ../opencv
+cmake -D CMAKE_BUILD_TYPE=Release -D WITH_CUDA=OFF -D WITH_GTK=ON -D WITH_GTK3=ON -D WITH_GTK_2_X=OFF -D ENABLE_PRECOMPILED_HEADERS=OFF -D CMAKE_INSTALL_PREFIX=/usr/local  ..
+# Build
+cmake --build .
+
+----
+Your opencv2.4 libraries are located in /usr/lib/x86_64-linux-gnu/ while the new opencv3 libraries are most likely located in /usr/local/lib. The linker is first looking in the /usr/lib/x86_64-linux-gnu/ directory, and thus finding the opencv2.4 libs first. To fix this you can tell the linker to look in /usr/local/lib first by adding the following to your ~/.bashrc file
+export LD_LIBRARY_PATH=/opt/ros/noetic/lib:/usr/local/lib:$LD_LIBRARY_PATH
+echo "export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH" >> ~/.bashrc
+
+Reload the bashrc file in the terminal as follows (or simply close and re-open the terminal):
+
+source ~/.bashrc
+
+And update the library database:
+
+sudo ldconfig
+
+To check the order in which the linker will search for libraries, you can use the following:
+
+ld -lopencv_core --verbose | grep attempt
+
+
+Thread 4 "mono_webcam" received signal SIGSEGV, Segmentation fault.
+[Switching to Thread 0x7fffe0316700 (LWP 78069)]
+__GI___pthread_mutex_lock (mutex=0x7000700040256) at ../nptl/pthread_mutex_lock.c:67
+67	../nptl/pthread_mutex_lock.c: No such file or directory.
+(gdb) backtrace
+#0  __GI___pthread_mutex_lock (mutex=0x7000700040256)
+    at ../nptl/pthread_mutex_lock.c:67
+#1  0x00007ffff7de1549 in void std::lock<std::unique_lock<std::mutex>, std::unique_lock<std::mutex>>(std::unique_lock<std::mutex>&, std::unique_lock<std::mutex>&) () at /home/sam/libs/ORB_SLAM3/lib/libORB_SLAM3.so
+#2  0x00007ffff7ddddec in ORB_SLAM3::MapPoint::isBad() ()
+    at /home/sam/libs/ORB_SLAM3/lib/libORB_SLAM3.so
+#3  0x00007ffff7df4126 in ORB_SLAM3::Map::PreSave(std::set<ORB_SLAM3::GeometricCamera*, std::less<ORB_SLAM3::GeometricCamera*>, std::allocator<ORB_SLAM3::GeometricCamera*> >&) () at /home/sam/libs/ORB_SLAM3/lib/libORB_SLAM3.so
+#4  0x00007ffff7df19d2 in ORB_SLAM3::Atlas::PreSave() ()
+    at /home/sam/libs/ORB_SLAM3/lib/libORB_SLAM3.so
+#5  0x00007ffff7d47856 in ORB_SLAM3::System::SaveAtlas(int) ()
+    at /home/sam/libs/ORB_SLAM3/lib/libORB_SLAM3.so
+#6  0x00007ffff7d47fb9 in ORB_SLAM3::System::Shutdown() ()
+    at /home/sam/libs/ORB_SLAM3/lib/libORB_SLAM3.so
+#7  0x00007ffff7eb94b4 in ORB_SLAM3::Viewer::Run() ()
+    at /home/sam/libs/ORB_SLAM3/lib/libORB_SLAM3.so
+#8  0x00007ffff4d16df4 in  () at /lib/x86_64-linux-gnu/libstdc++.so.6
+#9  0x00007ffff42f9609 in start_thread (arg=<optimised out>)
+    at pthread_create.c:477
+#10 0x00007ffff4b52133 in clone ()
+    at ../sysdeps/unix/sysv/linux/x86_64/clone.S:95
+(gdb) 
+
+sudo ldconfig -p | grep opencv
